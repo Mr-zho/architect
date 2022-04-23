@@ -9,6 +9,28 @@
 #include <sys/epoll.h>
 #include <iostream>
 
+// 结构体
+struct sockitem
+{
+    int sockfd;
+    // 回调函数
+    int (*callback)(int fd, int events, void * arg);
+};
+
+int recv_cb(int fd, int events, void * arg)
+{
+    // recv();
+    return 0;
+}
+
+// 回调函数
+int accept_cb(int fd, int events, void * arg)
+{
+    // accept();
+
+    return 0;
+}
+
 int main(int argc, const char *argv[])
 {   
     if (argc < 2)
@@ -48,6 +70,11 @@ int main(int argc, const char *argv[])
     ev.events = EPOLLIN;
     ev.data.fd = sockfd;
 
+    struct sockitem *si = malloc(sizeof(sizeof(sockitem)));
+    si->sockfd = sockfd;
+    si->callback = accept_cb;
+    ev.data.ptr = si;
+
     // 
     epoll_ctl(epfd, EPOLL_CTL_ADD, sockfd, &ev);
 
@@ -62,8 +89,120 @@ int main(int argc, const char *argv[])
 
         for (int i = 0; i < nReadys; i++)
         {
+#if 0
             if (events[i].data.fd == sockfd)
             {
+                struct sockaddr_in client_addr;
+                memset(&client_addr, 0, sizeof(struct sockaddr_in));
+                socklen_t client_len = sizeof(client_addr);
+                int clientfd = accept(sockfd, (struct sockaddr*)&client_addr, &client_len);
+                if (clientfd < 0)
+                {
+                    continue;
+                }
+
+                char visitip[INET_ADDRSTRLEN] = {0};
+                printf("ip:%s,port:%d\n",
+                        inet_ntop(AF_INET, &(client_addr.sin_addr),
+                                visitip, INET_ADDRSTRLEN), ntohs(client_addr.sin_port));
+
+                ev.events = EPOLLIN | EPOLLET;  // EPOLLET:边沿触发
+                ev.data.fd = clientfd;
+                epoll_ctl(epfd, EPOLL_CTL_ADD, clientfd, &ev);
+            }
+            else
+            {
+
+                // 取出通信句柄
+                int client_fd = events[i].data.fd;
+                char buffer[1024] = {0};
+
+                int ret = recv(client_fd, buffer, sizeof(buffer), 0);
+                if (ret < 0)
+                {
+                    if (errno == EAGAIN || errno == EWOULDBLOCK)
+                    {
+                        printf("normal\n");
+                        continue;
+                    }
+                    else
+                    {
+                        close(client_fd);
+                        ev.events = EPOLLIN;
+                        ev.data.fd = client_fd;
+                        epoll_ctl(epfd, EPOLL_CTL_DEL, client_fd, &ev);
+                    }
+                }
+                else if (ret == 0)
+                {
+                    // 客户端关闭通信
+                    close(client_fd);
+
+                    ev.events = EPOLLIN;
+                    ev.data.fd = client_fd;
+                    epoll_ctl(epfd, EPOLL_CTL_DEL, client_fd, &ev);
+                }
+                else
+                {
+                    // 数据
+                    printf ("Recv:%s,%d Bytes\n", buffer, ret);
+                }
+
+                if (events[i].events & EPOLLIN) //此操作确认是读事件
+                {
+                    // 取出通信句柄
+                    int client_fd = events[i].data.fd;
+                    char buffer[1024] = {0};
+
+                    int ret = recv(client_fd, buffer, sizeof(buffer), 0);
+                    if (ret < 0)
+                    {
+                        if (errno == EAGAIN || errno == EWOULDBLOCK)
+                        {
+                            printf("normal\n");
+                            continue;
+                        }
+                        else
+                        {
+                            close(client_fd);
+                            ev.events = EPOLLIN;
+                            ev.data.fd = client_fd;
+                            epoll_ctl(epfd, EPOLL_CTL_DEL, client_fd, &ev);
+                        }
+                    }
+                    else if (ret == 0)
+                    {
+                        // 客户端关闭通信
+                        close(client_fd);
+
+                        ev.events = EPOLLIN;
+                        ev.data.fd = client_fd;
+                        epoll_ctl(epfd, EPOLL_CTL_DEL, client_fd, &ev);
+                    }
+                    else
+                    {
+                        // 数据
+                        printf ("Recv:%s,%d Bytes\n", buffer, ret);
+                    }
+                }
+
+                if (events[i].events & EPOLLOUT)
+                {
+                    int clientfd = events[i].data.fd;
+
+                    int ret = send(clientfd, );
+
+                    ev.events |= EPOLLOUT;
+
+                    epoll_ctl();
+                }
+#endif
+
+#if 0
+            if(events[i].events & EPOLLIN)  // 有读事件
+            {
+                if (events[i].data.fd == sockfd)
+                {
                 struct sockaddr_in client_addr;
                 memset(&client_addr, 0, sizeof(struct sockaddr_in));
                 socklen_t client_len = sizeof(client_addr);
@@ -119,11 +258,29 @@ int main(int argc, const char *argv[])
                     printf ("Recv:%s,%d Bytes\n", buffer, ret);
                 }
             }
+
+            if(events[i].events & EPOLLOUT) // 有写事件
+            {
+                // 这边是有写事件
+            }
+#endif
+
+#if 1   
+            if(events[i].events & EPOLLIN)  // 有读事件
+            {
+                struct sockitem * si = (struct sockitem *)events[i].data.ptr;
+                si->callback(events[i].data.fd, events[i].events, si)
+            }
+
+            if(events[i].events & EPOLLOUT) // 有写事件
+            {
+                // 有写事件
+
+            }
+#endif
         }
 
     }
-
-
 
     return 0;
 }
