@@ -11,7 +11,7 @@
 #include <stdlib.h>
 
 
-int g_epfd = 0;
+// int g_epfd = 0;
 
 // 结构体-> 保存io的状态
 struct sockitem
@@ -19,7 +19,19 @@ struct sockitem
     int sockfd;
     // 回调函数
     int (*callback)(int fd, int events, void * arg);
+    char recvbuffer[1024];  // 
+    char sendbuffer[1024];
 };
+
+// mainloop  eventloop
+struct reactor
+{
+    int epfd;
+    struct epoll_event events[512];
+};
+
+// 全局变量
+struct reactor *eventloop = NULL;
 
 // 函数前置声明
 int recv_cb(int fd, int events, void * arg);
@@ -38,7 +50,7 @@ int send_cb(int fd, int events, void * arg)
     si->callback = recv_cb;
     
     ev.data.ptr = si;
-    epoll_ctl(g_epfd, EPOLL_CTL_MOD, fd, &ev);
+    epoll_ctl(eventloop->epfd, EPOLL_CTL_MOD, fd, &ev);
 
     return 0;
 }
@@ -66,7 +78,7 @@ int recv_cb(int fd, int events, void * arg)
         
         ev.events = EPOLLIN;
         ev.data.fd = fd;
-        epoll_ctl(g_epfd, EPOLL_CTL_DEL, fd, &ev);
+        epoll_ctl(eventloop->epfd, EPOLL_CTL_DEL, fd, &ev);
 
         // 客户端断开连接
         close(fd);
@@ -78,7 +90,7 @@ int recv_cb(int fd, int events, void * arg)
     {   
         ev.events = EPOLLIN;
         ev.data.fd = fd;
-        epoll_ctl(g_epfd, EPOLL_CTL_DEL, fd, &ev);
+        epoll_ctl(eventloop->epfd, EPOLL_CTL_DEL, fd, &ev);
 
         // 客户端断开连接
         close(fd);
@@ -101,7 +113,7 @@ int recv_cb(int fd, int events, void * arg)
         si->callback = send_cb;
         
         ev.data.ptr = si;
-        epoll_ctl(g_epfd, EPOLL_CTL_MOD, fd, &ev);
+        epoll_ctl(eventloop->epfd, EPOLL_CTL_MOD, fd, &ev);
         
         #endif
     }
@@ -137,7 +149,7 @@ int accept_cb(int fd, int events, void * arg)
     si->callback = recv_cb;
 
     ev.data.ptr = si;
-    epoll_ctl(g_epfd, EPOLL_CTL_ADD, client_fd, &ev);
+    epoll_ctl(eventloop->epfd, EPOLL_CTL_ADD, client_fd, &ev);
 
     return client_fd;
 }
@@ -175,8 +187,10 @@ int main(int argc, const char *argv[])
         return -3;
     }
 
+    eventloop = (struct reactor*)malloc(sizeof(struct reactor));
+
     // 接下来就是epoll的操作了
-    g_epfd = epoll_create(1);
+    eventloop->epfd = epoll_create(1);
     struct epoll_event ev;
     ev.events = EPOLLIN;
     ev.data.fd = sockfd;
@@ -186,13 +200,13 @@ int main(int argc, const char *argv[])
     si->callback = accept_cb;
     ev.data.ptr = si;
 
-    // 
-    epoll_ctl(g_epfd, EPOLL_CTL_ADD, sockfd, &ev);
+    
+    epoll_ctl(eventloop->epfd, EPOLL_CTL_ADD, sockfd, &ev);
 
-    struct epoll_event events[1024] = {0};
+    // struct epoll_event events[1024] = {0};
     while(true)
     {
-        int nReadys = epoll_wait(g_epfd, events, sizeof(events), -1);
+        int nReadys = epoll_wait(eventloop->epfd, eventloop->events, sizeof(eventloop->events), -1);
         if (nReadys < 0)
         {
             break;
@@ -380,18 +394,18 @@ int main(int argc, const char *argv[])
 
 // 第三版本
 #if 1   
-            if(events[i].events & EPOLLIN)  // 有读事件
+            if(eventloop->events[i].events & EPOLLIN)  // 有读事件
             { 
-                struct sockitem * si = (struct sockitem *)events[i].data.ptr;
+                struct sockitem * si = (struct sockitem *)eventloop->events[i].data.ptr;
                 // 不同做区分sockfd和clientfd
-                si->callback(si->sockfd, events[i].events, si);
+                si->callback(si->sockfd, eventloop->events[i].events, si);
             }
 
-            if(events[i].events & EPOLLOUT) // 有写事件
+            if(eventloop->events[i].events & EPOLLOUT) // 有写事件
             {
                 // 有写事件
-                struct sockitem * si = (struct sockitem *)events[i].data.ptr;
-                si->callback(si->sockfd, events[i].events, si);
+                struct sockitem * si = (struct sockitem *)eventloop->events[i].data.ptr;
+                si->callback(si->sockfd, eventloop->events[i].events, si);
             }
 #endif
         }
